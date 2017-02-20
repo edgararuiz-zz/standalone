@@ -1,0 +1,114 @@
+---
+title: "Local Hive Test"
+output: html_notebook
+---
+
+```{r, warning = FALSE, message = FALSE, eval = FALSE}
+# Install Dev version of sparklyr from GitHub
+devtools::install_github("rstudio/sparklyr", force = TRUE)
+```
+
+```{r}
+# Load libraries
+suppressMessages({
+  library(sparklyr)
+  library(tidyverse)
+  library(DBI)
+}) 
+```
+
+```{r}
+if(!file.exists("data/2008.csv.bz2"))
+{download.file("http://stat-computing.org/dataexpo/2009/2008.csv.bz2", "data/2008.csv.bz2")}
+if(!file.exists("data/2007.csv.bz2"))
+{download.file("http://stat-computing.org/dataexpo/2009/2007.csv.bz2", "data/2007.csv.bz2")}
+```
+
+```{r}
+spark_install("2.1.0")
+
+conf <- spark_config()
+conf$`sparklyr.shell.driver-memory` <- "14G"
+sc <- spark_connect(master = "local", version = "2.1.0", config = conf)
+
+```
+
+
+```{r}
+sql <- paste0("
+CREATE EXTERNAL TABLE hive_flights (
+  Year INT, 
+  Month INT, 
+  DayofMonth INT, 
+  DayOfWeek INT, 
+  DepTime INT, 
+  CRSDepTime INT, 
+  ArrTime INT, 
+  CRSArrTime INT, 
+  UniqueCarrier STRING, 
+  FlightNum INT, 
+  TailNum INT, 
+  ActualElapsedTime  INT,  
+  CRSElapsedTime INT, 
+  AirTime INT, 
+  ArrDelay  INT,  
+  DepDelay INT, 
+  Origin STRING, 
+  Dest STRING, 
+  Distance INT, 
+  TaxiIn  STRING, 
+  TaxiOut STRING, 
+  Cancelled INT, 
+  CancellationCode INT, 
+  Diverted INT, 
+  CarrierDelay  INT, 
+  WeatherDelay INT, 
+  NASDelay INT, 
+  SecurityDelay INT, 
+  LateAircraftDelay INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' LINES TERMINATED BY '\n' 
+LOCATION '" , file.path(getwd(), "data") ,  "'")
+DBI::dbGetQuery(sc, sql)
+```
+## Tidy Data & Model
+
+```{r}
+tidy_flights <- tbl(sc, "hive_flights") %>%
+  filter(!is.na(ArrDelay)) %>%
+  select(DepDelay, ArrDelay, Distance) %>%
+  sdf_register("spark_flights")
+
+tbl_cache(sc, "spark_flights")
+```
+
+```{r}
+sample_flights <- tidy_flights %>%
+  sample_frac(50)
+
+sample_count <- prettyNum(nrow(sample_flights) , big.mark = ",")
+print(sample_count)
+```
+
+### Model on `r sample_count` records
+
+```{r}
+reg_model <- sample_flights %>%
+  ml_linear_regression("ArrDelay", c("DepDelay", "Distance"))
+summary(reg_model)
+```
+
+
+
+```{r}
+reg_predict <- sdf_predict(reg_model, tidy_flights) %>%
+  mutate(diff = ArrDelay / prediction) 
+
+reg_predict
+```
+
+
+
+
+```{r}
+spark_disconnect(sc)
+```
