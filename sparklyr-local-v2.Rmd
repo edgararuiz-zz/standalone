@@ -1,0 +1,121 @@
+---
+title: "Local Hive Test"
+output: html_notebook
+---
+
+```{r, warning = FALSE, message = FALSE, eval = FALSE}
+# Install Dev version of sparklyr from GitHub
+devtools::install_github("rstudio/sparklyr", force = TRUE)
+```
+
+```{r}
+# Load libraries
+suppressMessages({
+  library(sparklyr)
+  library(tidyverse)
+  library(DBI)
+}) 
+```
+
+```{r}
+if(!file.exists("data/2008.csv.bz2"))
+{download.file("http://stat-computing.org/dataexpo/2009/2008.csv.bz2", "data/2008.csv.bz2")}
+if(!file.exists("data/2007.csv.bz2"))
+{download.file("http://stat-computing.org/dataexpo/2009/2007.csv.bz2", "data/2007.csv.bz2")}
+```
+
+```{r}
+spark_install("2.1.0")
+
+conf <- spark_config()
+conf$`sparklyr.shell.driver-memory` <- "14G"
+sc <- spark_connect(master = "local", version = "2.1.0", config = conf)
+
+```
+```{r}
+
+flights <- spark_read_csv(sc, "hive_flights", path = file.path(getwd(), "data"), memory = FALSE, 
+                          columns = list(
+                            Year = "character",
+                            Month = "character",
+                            DayofMonth = "character",
+                            DayOfWeek = "character",
+                            DepTime = "character",
+                            CRSDepTime = "character",
+                            ArrTime = "character",
+                            CRSArrTime = "character",
+                            UniqueCarrier = "character",
+                            FlightNum = "character",
+                            TailNum = "character",
+                            ActualElapsedTime = "character",
+                            CRSElapsedTime = "character",
+                            AirTime = "character",
+                            ArrDelay = "character",
+                            DepDelay = "character",
+                            Origin = "character",
+                            Dest = "character",
+                            Distance = "character",
+                            TaxiIn = "character",
+                            TaxiOut = "character",
+                            Cancelled = "character",
+                            CancellationCode = "character",
+                            Diverted = "character",
+                            CarrierDelay = "character",
+                            WeatherDelay = "character",
+                            NASDelay = "character",
+                            SecurityDelay = "character",
+                            LateAircraftDelay = "character"), 
+                          infer_schema = FALSE)
+
+```
+
+
+## Tidy Data & Model
+
+```{r}
+tidy_flights <- tbl(sc, "hive_flights") %>%
+  mutate(DepDelay = as.numeric(DepDelay), 
+         ArrDelay = as.numeric(ArrDelay), 
+         Distance = as.numeric(Distance)
+         ) %>%
+  select(DepDelay, ArrDelay, Distance) %>%
+  filter(!is.na(ArrDelay)) %>%
+  sdf_register("spark_flights")
+
+tbl_cache(sc, "spark_flights")
+
+
+```
+
+```{r}
+sample_flights <- tidy_flights %>%
+  sample_frac(50) %>%
+  sdf_register("sample_flights")
+
+tbl_cache(sc, "sample_flights")
+
+sample_count <- prettyNum(nrow(sample_flights) , big.mark = ",")
+print(sample_count)
+```
+
+### Model on `r sample_count` records
+
+```{r}
+reg_model <- sample_flights %>%
+  ml_linear_regression("ArrDelay", c("DepDelay", "Distance"))
+summary(reg_model)
+```
+
+
+
+```{r}
+reg_predict <- sdf_predict(reg_model, tidy_flights) %>%
+  mutate(diff = ArrDelay / prediction) 
+
+reg_predict
+```
+
+
+```{r}
+spark_disconnect(sc)
+```

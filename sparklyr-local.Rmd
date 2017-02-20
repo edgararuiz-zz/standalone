@@ -33,7 +33,6 @@ sc <- spark_connect(master = "local", version = "2.1.0", config = conf)
 
 ```
 
-
 ```{r}
 sql <- paste0("
 CREATE EXTERNAL TABLE hive_flights (
@@ -105,8 +104,6 @@ reg_predict <- sdf_predict(reg_model, tidy_flights) %>%
 
 reg_predict
 ```
-
-
 
 
 ```{r}
