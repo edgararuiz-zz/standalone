@@ -8,16 +8,25 @@
       library(DBI)
     }) 
 
+Download files
+-----------------
+
     if(!file.exists("data/2008.csv.bz2"))
     {download.file("http://stat-computing.org/dataexpo/2009/2008.csv.bz2", "data/2008.csv.bz2")}
     if(!file.exists("data/2007.csv.bz2"))
     {download.file("http://stat-computing.org/dataexpo/2009/2007.csv.bz2", "data/2007.csv.bz2")}
+
+Connect to Local Spark
+-----------------
 
     spark_install("2.1.0")
 
     conf <- spark_config()
     conf$`sparklyr.shell.driver-memory` <- "14G"
     sc <- spark_connect(master = "local", version = "2.1.0", config = conf)
+
+Create temp Hive table
+-----------------
 
     sql <- paste0("
     CREATE EXTERNAL TABLE hive_flights (
