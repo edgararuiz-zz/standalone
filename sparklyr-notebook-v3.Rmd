@@ -89,6 +89,41 @@ sc <- spark_connect(master = "spark://ip-172-30-1-5.us-west-2.compute.internal:7
                     config =  conf)
 ```
 
+
+```{r}
+taxi <- spark_read_csv(sc, 
+                       name = "trips_par", 
+                       path = "s3a://rstudio-sparkdemo-data/nyc-taxi/parquet_nohead/trips" ,
+                       memory = FALSE,
+                       columns = list(
+                         id = "character",
+                         cab_type_id = "character",
+                         vendor_id = "character",
+                         pickup_datetime = "character",
+                         dropoff_datetime = "character",
+                         store_and_fwd_flag = "character",
+                         rate_code_id = "character",
+                         pickup_longitude = "character",
+                         pickup_latitude = "character",
+                         dropoff_longitude = "character",
+                         dropoff_latitude = "character",
+                         passenger_count = "character",
+                         trip_distance = "character",
+                         fare_amount = "character",
+                         extra = "character",
+                         mta_tax = "character",
+                         tip_amount = "character",
+                         tolls_amount = "character",
+                         ehail_fee = "character",
+                         improvement_surcharge = "character",
+                         total_amount = "character",
+                         payment_type = "character",
+                         trip_type = "character",
+                         pickup_nyct2010_gid = "character",
+                         dropoff_nyct2010_gid = "character"),
+                       infer_schema = FALSE)
+
+```
 ```{r}
 
 

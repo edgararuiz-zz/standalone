@@ -89,9 +89,12 @@ sc <- spark_connect(master = "spark://ip-172-30-1-5.us-west-2.compute.internal:7
 ## Load Data
 
 ```{r}
-flights <- spark_read_csv(sc, name = "spark_flights",
+system.time({
+flights <- spark_read_csv(sc, name = "readcsv_flights_regular",
                          path = "s3a://flights-data/*",
                          header = TRUE)
+})
+tbl(sc, "readcsv_flights") %>% tally
 ```
 
 ## Tidy Data & Model

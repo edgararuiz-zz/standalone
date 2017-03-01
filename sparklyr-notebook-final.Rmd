@@ -156,7 +156,7 @@ Setting the **memory** argument to FALSE, will tell Spark to not load the data i
 
 ```{r}
 flights <- spark_read_csv(sc, name = "flights_spark",
-                         path = "s3a://flights-data/*",
+                         path = "s3a://flights-data/full/*",
                          header = TRUE,
                          memory = FALSE)
 ```

@@ -1,0 +1,408 @@
+---
+title: "Spark Standalone/S3 & sparklyr"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+## Load Libraries
+
+```{r, warning = FALSE, message = FALSE, eval = FALSE}
+# Install Dev version of sparklyr from GitHub
+devtools::install_github("rstudio/sparklyr", force = TRUE)
+```
+
+```{r}
+# Load libraries
+suppressMessages({
+  library(sparklyr)
+  library(tidyverse)
+  library(DBI)
+  })
+
+test_results <- matrix(nrow=5, ncol=5)
+```
+
+## Load AWS Credentials
+
+```{r, eval = FALSE}
+Sys.setenv(AWS_ACCESS_KEY_ID="[Your access key]")
+Sys.setenv(AWS_SECRET_ACCESS_KEY="[Your secret access key]")
+```
+```{r}
+# Load AWS credentials
+source("localonly/aws-credentials.R")
+```
+
+## Connect to Spark
+
+### Spark connection configuration
+
+```{r}
+if(file.exists("metastore_db/"))unlink("metastore_db", recursive = TRUE, force = TRUE)
+conf <- spark_config()
+conf$spark.memory.fraction <- 0.9
+conf$spark.executor.memory <- "14g"
+conf$sparklyr.defaultPackages <- "org.apache.hadoop:hadoop-aws:2.7.3"
+```
+
+
+```{r}
+sc <- spark_connect(master = "spark://ip-172-30-1-5.us-west-2.compute.internal:7077", 
+                    spark_home = "/home/ubuntu/spark-2.1.0-bin-hadoop2.7/",
+                    config =  conf)
+```
+
+
+## DBI
+
+```{r}
+
+sql <- "
+CREATE EXTERNAL TABLE dbi_flights (
+  Year INT, 
+  Month INT, 
+  DayofMonth INT, 
+  DayOfWeek INT, 
+  DepTime INT, 
+  CRSDepTime INT, 
+  ArrTime INT, 
+  CRSArrTime INT, 
+  UniqueCarrier STRING, 
+  FlightNum INT, 
+  TailNum INT, 
+  ActualElapsedTime  INT,  
+  CRSElapsedTime INT, 
+  AirTime INT, 
+  ArrDelay  INT,  
+  DepDelay INT, 
+  Origin STRING, 
+  Dest STRING, 
+  Distance INT, 
+  TaxiIn  STRING, 
+  TaxiOut STRING, 
+  Cancelled INT, 
+  CancellationCode INT, 
+  Diverted INT, 
+  CarrierDelay  INT, 
+  WeatherDelay INT, 
+  NASDelay INT, 
+  SecurityDelay INT, 
+  LateAircraftDelay INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' LINES TERMINATED BY '\n' 
+LOCATION 's3a://flights-data/full/'"
+
+maps_data <- system.time({
+  DBI::dbGetQuery(sc, sql)
+})
+```
+
+
+```{r}
+register_tidy <- system.time({
+  tidy_flights <- tbl(sc, "dbi_flights") %>%
+    filter(!is.na(ArrDelay)) %>%
+    select(DepDelay, ArrDelay, Distance) %>%
+    sdf_register("dbi_tidy")
+})
+```
+
+```{r}
+cache_tidy <- system.time({
+  tbl_cache(sc, "dbi_tidy")
+})
+```
+
+```{r}
+total_row <- tbl(sc, "dbi_tidy") %>% tally
+```
+
+```{r}
+tbl(sc, "dbi_tidy") %>% sample_n(5)
+```
+
+```{r}
+test_results[1,1] <- "DBI"
+test_results[1,2] <- maps_data[3]
+test_results[1,3] <- register_tidy[3]
+test_results[1,4] <- cache_tidy[3]
+total_row <- total_row %>% collect
+test_results[1,5] <- total_row$n[1]
+```
+
+## spark_read_csv
+
+```{r}
+maps_data <- system.time({
+  flights <- spark_read_csv(sc, "readcsv_flights", 
+                            path =  "s3a://flights-data/full", 
+                            memory = FALSE, 
+                            columns = list(
+                              Year = "character",
+                              Month = "character",
+                              DayofMonth = "character",
+                              DayOfWeek = "character",
+                              DepTime = "character",
+                              CRSDepTime = "character",
+                              ArrTime = "character",
+                              CRSArrTime = "character",
+                              UniqueCarrier = "character",
+                              FlightNum = "character",
+                              TailNum = "character",
+                              ActualElapsedTime = "character",
+                              CRSElapsedTime = "character",
+                              AirTime = "character",
+                              ArrDelay = "character",
+                              DepDelay = "character",
+                              Origin = "character",
+                              Dest = "character",
+                              Distance = "character",
+                              TaxiIn = "character",
+                              TaxiOut = "character",
+                              Cancelled = "character",
+                              CancellationCode = "character",
+                              Diverted = "character",
+                              CarrierDelay = "character",
+                              WeatherDelay = "character",
+                              NASDelay = "character",
+                              SecurityDelay = "character",
+                              LateAircraftDelay = "character"), 
+                            infer_schema = FALSE)
+})
+
+```
+
+
+```{r}
+register_tidy <- system.time({
+  tidy_flights <- tbl(sc, "readcsv_flights") %>%
+    mutate(ArrDelay = as.integer(ArrDelay),
+           DepDelay = as.integer(DepDelay),
+           Distance = as.integer(Distance)) %>%
+    filter(!is.na(ArrDelay)) %>%
+    select(DepDelay, ArrDelay, Distance) %>%
+    sdf_register("readcsv_tidy")
+})
+```
+
+```{r}
+cache_tidy <-system.time({
+  tbl_cache(sc, "readcsv_tidy")
+})
+
+```
+
+```{r}
+total_row <- tbl(sc, "readcsv_tidy") %>% tally
+```
+
+```{r}
+tbl(sc, "readcsv_tidy") %>% sample_n(5)
+```
+
+```{r}
+test_results[2,1] <- "memory-no-infer-no"
+test_results[2,2] <- maps_data[3]
+test_results[2,3] <- register_tidy[3]
+test_results[2,4] <- cache_tidy[3]
+total_row <- total_row %>% collect
+test_results[2,5] <- total_row$n[1]
+
+```
+
+
+
+## spark_read_csv - Memory TRUE
+
+```{r}
+maps_data <- system.time({
+  flights <- spark_read_csv(sc, "cachecsv_flights", 
+                            path =  "s3a://flights-data/full", 
+                            memory = TRUE, 
+                            columns = list(
+                              Year = "character",
+                              Month = "character",
+                              DayofMonth = "character",
+                              DayOfWeek = "character",
+                              DepTime = "character",
+                              CRSDepTime = "character",
+                              ArrTime = "character",
+                              CRSArrTime = "character",
+                              UniqueCarrier = "character",
+                              FlightNum = "character",
+                              TailNum = "character",
+                              ActualElapsedTime = "character",
+                              CRSElapsedTime = "character",
+                              AirTime = "character",
+                              ArrDelay = "character",
+                              DepDelay = "character",
+                              Origin = "character",
+                              Dest = "character",
+                              Distance = "character",
+                              TaxiIn = "character",
+                              TaxiOut = "character",
+                              Cancelled = "character",
+                              CancellationCode = "character",
+                              Diverted = "character",
+                              CarrierDelay = "character",
+                              WeatherDelay = "character",
+                              NASDelay = "character",
+                              SecurityDelay = "character",
+                              LateAircraftDelay = "character"), 
+                            infer_schema = FALSE)
+})
+
+```
+
+
+```{r}
+register_tidy <- system.time({
+  tidy_flights <- tbl(sc, "cachecsv_flights") %>%
+    mutate(ArrDelay = as.integer(ArrDelay),
+           DepDelay = as.integer(DepDelay),
+           Distance = as.integer(Distance)) %>%
+    filter(!is.na(ArrDelay)) %>%
+    select(DepDelay, ArrDelay, Distance) %>%
+    sdf_register("cachecsv_tidy")
+})
+```
+
+```{r}
+cache_tidy <-system.time({
+  tbl_cache(sc, "cachecsv_tidy")
+})
+
+```
+
+```{r}
+total_row <- tbl(sc, "cachecsv_tidy") %>% tally
+```
+
+```{r}
+tbl(sc, "cachecsv_tidy") %>% sample_n(5)
+```
+
+```{r}
+test_results[5,1] <- "memory-yes-infer-no"
+test_results[5,2] <- maps_data[3]
+test_results[5,3] <- register_tidy[3]
+test_results[5,4] <- cache_tidy[3]
+total_row <- total_row %>% collect
+test_results[5,5] <- total_row$n[1]
+
+```
+
+
+### spark_read_csv - In Memory 
+
+```{r}
+maps_data <- system.time({
+flights <- spark_read_csv(sc, name = "readcsv_flights_regular",
+                         path = "s3a://flights-data/full/*",
+                         header = TRUE,
+                         memory = TRUE)
+})
+```
+```{r}
+register_tidy <- system.time({
+  tidy_flights <- tbl(sc, "readcsv_flights_regular") %>%
+    mutate(ArrDelay = as.integer(ArrDelay),
+           DepDelay = as.integer(DepDelay),
+           Distance = as.integer(Distance)) %>%
+    filter(!is.na(ArrDelay)) %>%
+    select(DepDelay, ArrDelay, Distance) %>%
+    sdf_register("readcsv_tidy_regular")
+})
+```
+```{r}
+cache_tidy <-system.time({
+  tbl_cache(sc, "readcsv_tidy_regular")
+})
+```
+```{r}
+total_row <- tbl(sc, "readcsv_tidy_regular") %>% tally
+```
+```{r}
+tbl(sc, "readcsv_tidy_regular") %>% sample_n(5)
+```
+```{r}
+test_results[3,1] <- "memory-yes-infer-yes"
+test_results[3,2] <- maps_data[3]
+test_results[3,3] <- register_tidy[3]
+test_results[3,4] <- cache_tidy[3]
+total_row <- total_row %>% collect
+test_results[3,5] <- total_row$n[1]
+
+```
+### spark_read_csv - Not Cached 
+
+```{r}
+maps_data <- system.time({
+flights <- spark_read_csv(sc, name = "readcsv_flights_notcached",
+                         path = "s3a://flights-data/full*",
+                         header = TRUE,
+                         memory = FALSE)
+})
+```
+```{r}
+register_tidy <- system.time({
+  tidy_flights <- tbl(sc, "readcsv_flights_notcached") %>%
+    mutate(ArrDelay = as.integer(ArrDelay),
+           DepDelay = as.integer(DepDelay),
+           Distance = as.integer(Distance)) %>%
+    filter(!is.na(ArrDelay)) %>%
+    select(DepDelay, ArrDelay, Distance) %>%
+    sdf_register("readcsv_tidy_notcached")
+})
+```
+```{r}
+cache_tidy <-system.time({
+  tbl_cache(sc, "readcsv_tidy_notcached")
+})
+```
+```{r}
+total_row <- tbl(sc, "readcsv_tidy_notcached") %>% tally
+```
+```{r}
+tbl(sc, "readcsv_tidy_notcached") %>% sample_n(5)
+```
+```{r}
+test_results[4,1] <- "memory-no-infer-yes"
+test_results[4,2] <- maps_data[3]
+test_results[4,3] <- register_tidy[3]
+test_results[4,4] <- cache_tidy[3]
+total_row <- total_row %>% collect
+test_results[4,5] <- total_row$n[1]
+
+```
+
+## Results
+
+```{r}
+
+test_results1 <- data.frame(
+  test = test_results[,1],
+  map = as.numeric(test_results[,2]),
+  register = as.numeric(test_results[,3]),
+  cache = as.numeric(test_results[,4]),
+  rows = as.numeric(test_results[,5])) %>%
+  mutate(total = map + register + cache) %>%
+  arrange(cache)
+  
+
+```
+
+
+```{r}
+write.csv(test_results1, "results.csv")
+print(test_results1)
+
+```
+## Disconnect
+
+
+```{r}
+spark_disconnect(sc)
+
+```
+

@@ -1,0 +1,16 @@
+---
+title: "S3 Results"
+output: html_notebook
+---
+
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+
+results <- read_csv("results.csv")
+
+results <- results %>%
+  mutate(total = map + register + cache)
+
+```
+

@@ -29,6 +29,7 @@ spark_install("2.1.0")
 
 conf <- spark_config()
 conf$`sparklyr.shell.driver-memory` <- "14G"
+conf$sparklyr.defaultPackages <- "org.apache.hadoop:hadoop-aws:2.7.3" 
 sc <- spark_connect(master = "local", version = "2.1.0", config = conf)
 
 ```
