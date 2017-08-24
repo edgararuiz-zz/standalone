@@ -1,0 +1,110 @@
+---
+title: "sparklyr Stand Alone"
+output: html_notebook
+---
+
+```{r}
+library(sparklyr)
+library(dplyr)
+```
+
+```{r}
+aws_key <- config::get()
+
+Sys.setenv(AWS_ACCESS_KEY_ID = aws_key$keyid)
+Sys.setenv(AWS_SECRET_ACCESS_KEY = aws_key$secretkey)
+```
+
+```{r}
+conf <- spark_config()
+conf$spark.executor.memory <- "2GB"
+conf$spark.memory.fraction <- 0.9
+conf$sparklyr.defaultPackages <- "org.apache.hadoop:hadoop-aws:2.7.3"
+
+sc <- spark_connect(master="spark://ip-172-30-1-20.us-west-2.compute.internal:7077", 
+              version = "2.1.0",
+              config = conf,
+              spark_home = "/home/ubuntu/spark-2.1.0-bin-hadoop2.7/")
+
+
+```
+
+```{r}
+flights <- spark_read_csv(sc, "flights_spark", 
+                          path =  "s3a://flights-data/full", 
+                          memory = FALSE, 
+                          infer_schema = FALSE,
+                          columns = list(
+                            Year = "character",
+                            Month = "character",
+                            DayofMonth = "character",
+                            DayOfWeek = "character",
+                            DepTime = "character",
+                            CRSDepTime = "character",
+                            ArrTime = "character",
+                            CRSArrTime = "character",
+                            UniqueCarrier = "character",
+                            FlightNum = "character",
+                            TailNum = "character",
+                            ActualElapsedTime = "character",
+                            CRSElapsedTime = "character",
+                            AirTime = "character",
+                            ArrDelay = "character",
+                            DepDelay = "character",
+                            Origin = "character",
+                            Dest = "character",
+                            Distance = "character",
+                            TaxiIn = "character",
+                            TaxiOut = "character",
+                            Cancelled = "character",
+                            CancellationCode = "character",
+                            Diverted = "character",
+                            CarrierDelay = "character",
+                            WeatherDelay = "character",
+                            NASDelay = "character",
+                            SecurityDelay = "character",
+                            LateAircraftDelay = "character")
+                          )
+```
+
+```{r}
+sample_data <- flights %>%
+  mutate(ArrDelay = as.numeric(ArrDelay),
+         CRSDepTime = as.numeric(CRSDepTime)) %>%
+  filter(!is.na(ArrDelay)) %>%
+  ft_binarizer(input.col = "ArrDelay",
+               output.col = "delayed",
+               threshold = 15) %>% 
+  ft_bucketizer(input.col =  "CRSDepTime",
+                output.col = "DepHour",
+                splits = c(0, 400, 800, 1200, 1600, 2000, 2400)) %>%
+  mutate(DepHour = paste0("h", as.integer(DepHour))) %>%
+  select(DepHour, DepDelay, delayed, Origin) %>%
+  compute("sample_flights")
+
+sample_partitions <- sample_data %>%
+  sdf_partition(training = 0.01, testing = 0.09, other = 0.9) 
+
+training <- compute(sample_partitions$training, "training")
+```
+
+```{r}
+sample_data %>%
+  tally
+```
+
+```{r}
+delayed_model <-  ml_logistic_regression(training , delayed ~  DepDelay + DepHour ) 
+```
+
+
+```{r}
+devtools::install_github("edgararuiz/dbplot")
+library(dbplot)
+```
+
+```{r}
+sample_data %>%
+  dbplot_histogram(DepDelay)
+```
+
